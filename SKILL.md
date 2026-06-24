@@ -87,6 +87,7 @@ Use the tier closest to the detected usable VRAM (or unified memory):
 | **24GB VRAM** | RTX 3090 / 4090 24GB | qwen3-coder:30b, Qwen3.6 27B, Qwen3.6-35B-A3B, Gemma 4 26B-A4B. Don't assume 70B Q4 fits |
 | **32GB+ / dual 3090 / unified** | RTX 5090 32GB, 2× 3090 48GB, DGX Spark/Strix Halo | Qwen3.6 27B, 35B-A3B, Gemma 31B Q4, Gemma 26B-A4B; 70B-class with enough VRAM/offload. On unified memory, prefer MoE |
 | **96GB (RTX 6000 Pro)** | RTX PRO 6000 / 6000 96GB | Qwen3.6 27B Q8 @ up to 256k context, ~8 concurrent (Linux/vLLM); 70B–80B class |
+| **192–512GB+ unified/system, or multi-node** | 256GB Mac Studio, 24GB GPU + 192–256GB RAM (offload), 4× GB10/DGX Spark cluster, 8× A100/H100-class | **GLM 5.2** — local GGUF only (`unsloth/GLM-5.2-GGUF`): 1-bit ~217–228GB · 2-bit ~238–254GB · Q4 ~365–467GB. 192GB → 1-bit only; 256GB → 2-bit; cluster → Q4/IQ4. Expect slow tok/s and quality loss at low bit. **`glm-5.2:cloud` is NOT local** |
 
 ### The 3 picks
 
@@ -102,6 +103,12 @@ If one model is the best answer for two slots, pick the next-best for the second
 the user gets variety. Honor the rule: small models for always-on routing, bigger
 models for fewer, harder calls.
 
+**Very-large-memory machines (≥192GB unified/system):** GLM 5.2 becomes the "🔥 most
+powerful you can run" — but only as a local GGUF (`unsloth/GLM-5.2-GGUF`), sized to
+memory (192GB → 1-bit, 256GB → 2-bit), and warn it's slow with quality loss at low
+bit. Never recommend `ollama run glm-5.2:cloud` as "local" — that tag is cloud-routed.
+Still give a fast 💻 coding and ⚡ small pick (Qwen3.6 27B, Gemma4 E4B) for daily use.
+
 ## Download links
 
 Give clickable links for each pick. If unsure of the exact repo slug, link the
@@ -109,6 +116,8 @@ search page rather than inventing a slug:
 - Ollama: `https://ollama.com/search?q=<model>` (e.g. `qwen3-coder`, `gemma`, `qwen3`)
 - Hugging Face: `https://huggingface.co/models?search=<model>`
 - LM Studio: `https://lmstudio.ai/models`
+- For GLM 5.2 link the local GGUF, `https://huggingface.co/unsloth/GLM-5.2-GGUF`
+  (via llama.cpp / LM Studio / Ollama HF pull) — not the cloud-routed `glm-5.2:cloud` tag.
 
 ## Output format
 

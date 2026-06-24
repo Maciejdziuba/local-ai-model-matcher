@@ -11,48 +11,47 @@ detect them yourself using safe, read-only commands.
 
 Run this from the user's project root (or anywhere — it doesn't touch their files).
 
+Model picks are grounded in a June 2026 sweep of public conversations
+(r/LocalLLaMA, r/ollama, Hacker News, NVIDIA Developer Forums) plus David Ondrej's
+0xSero interview. These are community signals to test, **not guarantees** — real
+VRAM/speed depends on quant, KV cache, context length, runtime, and drivers.
+
 ## SAFETY RULES — read first, do not skip
 
 - **Read-only only.** Only run the exact detection commands listed below.
 - **Never** write, move, or delete files. **Never** use `sudo`. **Never** install
   anything. **Never** make network calls during detection.
-- Before running detection, tell the user in one line what you're about to read
-  ("I'll read your GPU, VRAM, RAM, and OS — read-only, nothing is changed").
-- If a command isn't found, skip it gracefully and move on. Never guess specs you
-  couldn't read — say what you couldn't detect.
+- Before detecting, tell the user in one line what you'll read ("I'll read your GPU,
+  VRAM, RAM, and OS — read-only, nothing is changed").
+- If a command isn't found, skip it gracefully. Never guess specs you couldn't read.
 
 ## Step 1 — Detect the OS
 
-Run one of:
-- `uname -s` (macOS/Linux) — `Darwin` = macOS, `Linux` = Linux
-- On Windows the agent is typically in PowerShell; check `$PSVersionTable` or `ver`.
+- `uname -s` → `Darwin` = macOS, `Linux` = Linux
+- Windows: PowerShell is typical; check `$PSVersionTable` or `ver`.
 
-A helper script is bundled — prefer it if present:
+Prefer the bundled helper if present:
 - macOS/Linux: `bash scripts/detect-specs.sh`
 - Windows: `powershell -ExecutionPolicy Bypass -File scripts/detect-specs.ps1`
 
-If the script isn't available, run the per-OS commands below directly.
-
 ## Step 2 — Detect hardware (read-only)
 
-### macOS (Apple Silicon or Intel)
+### macOS (Apple Silicon shares unified memory)
 ```bash
-sysctl -n hw.memsize                    # total system RAM (bytes)
-sysctl -n machdep.cpu.brand_string      # CPU
-system_profiler SPDisplaysDataType      # GPU / chip (unified memory on Apple Silicon)
+sysctl -n hw.memsize                    # total RAM (bytes)
+sysctl -n machdep.cpu.brand_string      # CPU / chip
+system_profiler SPDisplaysDataType      # GPU / chip / cores
 ```
-On Apple Silicon, **unified memory ≈ usable VRAM** (the GPU shares system RAM).
-Treat ~75% of total RAM as usable for model weights.
+Apple Silicon: treat **~75% of unified memory** as usable for model weights.
 
 ### Linux
 ```bash
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader   # NVIDIA GPUs + VRAM
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader   # NVIDIA + VRAM
 free -h                                                          # system RAM
 lscpu | grep -E "Model name|^CPU\(s\)"                           # CPU
-lspci | grep -Ei "vga|3d|display"                               # fallback: any GPU
+lspci | grep -Ei "vga|3d|display"                               # any GPU (fallback)
 ```
-If `nvidia-smi` is missing there is likely no NVIDIA GPU — fall back to CPU/iGPU
-models and small quantized models in system RAM.
+No `nvidia-smi` → likely no NVIDIA GPU; fall back to CPU/iGPU + small models.
 
 ### Windows (PowerShell)
 ```powershell
@@ -60,64 +59,56 @@ Get-CimInstance Win32_VideoController | Select-Object Name, AdapterRAM
 Get-CimInstance Win32_ComputerSystem | Select-Object TotalPhysicalMemory
 Get-CimInstance Win32_Processor | Select-Object Name
 ```
-`AdapterRAM` can misreport on some drivers — if it looks wrong, ask the user to
-confirm their GPU's VRAM rather than guessing.
+`AdapterRAM` can misreport — if it looks wrong, ask the user to confirm VRAM. Use
+`nvidia-smi` if present (most reliable).
 
 ## Step 3 — Compute usable VRAM
 
-- **Dedicated NVIDIA/AMD GPU:** usable VRAM = sum of GPU memory (minus ~1–2GB
-  overhead per card).
+- **Dedicated GPU:** usable = sum of VRAM minus ~1–2GB/card overhead.
 - **Apple Silicon:** usable ≈ 75% of unified memory.
-- **No dedicated GPU:** you can still run small models in system RAM on CPU, just
-  slowly — recommend ≤8B 4-bit models.
+- **No dedicated GPU:** small models in system RAM on CPU only (slow) — cap at ≤9B 4-bit.
 
-VRAM estimate for a model:
-```
-VRAM_GB ≈ params_billion × bytes_per_param × 1.2   (+ a few GB for context)
-  4-bit ≈ 0.5 bytes/param   →  params_B × 0.6
-  8-bit ≈ 1.0 bytes/param   →  params_B × 1.2
-```
-For MoE models, use **total** params for the memory check (all weights must load),
-but expect speed closer to the **active** param count.
+VRAM estimate: `VRAM_GB ≈ params_B × bytes_per_param × 1.2` (+ a few GB for KV cache).
+`4-bit ≈ 0.6×params_B`, `8-bit ≈ 1.2×params_B`. For **MoE**, the *total* params must
+fit in memory, but speed tracks the *active* params (e.g. `35B-A3B` = 35B total /
+3B active). Always leave headroom for KV cache and your agent's context.
 
-## Step 4 — Recommend exactly 3 models
+## Step 4 — Map specs to a tier, then pick 3 models
 
-From the model table below, pick:
+Use the tier closest to the detected usable VRAM (or unified memory):
 
-1. **🔥 Most powerful you can run** — the highest-quality model that fits usable
-   VRAM at a sane quant (prefer 4-bit if 8-bit doesn't fit). State the quant.
-2. **💻 Best for coding** — the strongest coding/agentic model that fits (Qwen 3.6,
-   GLM, Step — these excel at backend/DevOps/agent work).
-3. **⚡ Best small + fast** — a model that leaves plenty of headroom and runs at high
-   tok/s for everyday/tool-calling use.
+| Tier | Hardware | Run these |
+|---|---|---|
+| **No GPU / 8–16GB RAM** | CPU-only, old 4GB GPU, GTX 1650-class | Phi-4 Mini, Qwen3.5 4B, Gemma 3/4 4B, Llama 3.2 3B. Not a real Claude-Code replacement |
+| **Apple Silicon 16GB** | M-series 16GB unified | Qwen3.5 4B; small embedding + transcription. Avoid 9B+ if it swaps |
+| **8GB VRAM + 32GB RAM** | RTX 4060/3050 8GB | Qwen3.5 9B Q4, Gemma4 E4B, Qwen3:8B Q4. Advanced: Qwen3.6-35B-A3B Q4 with expert offload |
+| **12GB VRAM + 32–64GB** | RTX 3060/3080 Ti 12GB | Qwen3.6-35B-A3B Q4/Q5 (partial offload), Gemma-4-26B-A4B. Keep system prompts small |
+| **16GB VRAM + 64GB** | RTX 5080/5070 Ti 16GB | Qwen3.6-27B-IQ4_XS (turbo KV) — aggressive pick; Qwen3 14B (safe); Devstral / Mistral Small 24B; Gemma4 E4B (fast) |
+| **24GB VRAM** | RTX 3090 / 4090 24GB | qwen3-coder:30b, Qwen3.6 27B, Qwen3.6-35B-A3B, Gemma 4 26B-A4B. Don't assume 70B Q4 fits |
+| **32GB+ / dual 3090 / unified** | RTX 5090 32GB, 2× 3090 48GB, DGX Spark/Strix Halo | Qwen3.6 27B, 35B-A3B, Gemma 31B Q4, Gemma 26B-A4B; 70B-class with enough VRAM/offload. On unified memory, prefer MoE |
+| **96GB (RTX 6000 Pro)** | RTX PRO 6000 / 6000 96GB | Qwen3.6 27B Q8 @ up to 256k context, ~8 concurrent (Linux/vLLM); 70B–80B class |
 
-If the same model is the best answer for two slots, pick the next-best for the
-second so the user gets variety.
+### The 3 picks
 
-## Model table
+1. **🔥 Most powerful you can run** — highest-quality model that fits usable VRAM
+   with room for KV cache (prefer 4-bit if 8-bit won't fit). State the quant.
+2. **💻 Best for coding** — strongest coding/agentic model that fits. Qwen3.6 27B,
+   qwen3-coder:30b, and Qwen3.6-35B-A3B are the repeated community coding picks;
+   Devstral / Mistral Small 24B as alternatives.
+3. **⚡ Best small + fast** — leaves headroom, high tok/s for always-on tool routing:
+   Gemma4 E4B, Qwen3:8B, Qwen3.5 4B, Phi-4 Mini.
 
-| Model | Total / active params | Type | Strengths | ~VRAM @ 4-bit | ~VRAM @ 8-bit | Links |
-|---|---|---|---|---|---|---|
-| Gemma 3 4B | 4B | dense | small, fast, world knowledge | ~3 GB | ~5 GB | HF · Ollama |
-| Qwen 3.6 8B | 8B | dense | fast, strong tool-calling | ~5 GB | ~9 GB | HF · LM Studio · Ollama |
-| Gemma 3 12B | 12B | dense | general, knowledge | ~8 GB | ~14 GB | HF · Ollama |
-| Qwen 3.6 27B | 27B | dense-ish | **coding/agentic**, reasons like much bigger models | ~16 GB | ~30 GB | HF · LM Studio · Ollama |
-| Gemma 3 27B | 27B | dense | world knowledge (weaker at agentic) | ~16 GB | ~30 GB | HF · Ollama |
-| Qwen 3.6 35B | 35B | dense-ish | **coding/agentic**, more headroom | ~22 GB | ~40 GB | HF · LM Studio · Ollama |
-| Hermes 70B | 70B | dense | uncensored, general | ~40 GB | ~75 GB | HF · LM Studio |
-| Step 3.7 Flash | MoE | MoE | big step up, coding | ~fits 256GB tier | — | HF |
-| DeepSeek V4 Flash | MoE | MoE | fast agentic, concurrency | ~$20k tier | — | HF |
-| Minimax M2 | 229B / 10B active | MoE | strong, efficient decode | ~140 GB | — | HF |
-| GLM 5.2 | 744B / 40B active | MoE | **frontier coding/DevOps/agents** | ~450 GB | — | HF |
-| Kimi K2.5 | 1T / 30B active | MoE | frontier breadth | ~600 GB | — | HF |
+If one model is the best answer for two slots, pick the next-best for the second so
+the user gets variety. Honor the rule: small models for always-on routing, bigger
+models for fewer, harder calls.
 
-**Canonical link bases** (construct the model's page; confirm the exact slug):
+## Download links
+
+Give clickable links for each pick. If unsure of the exact repo slug, link the
+search page rather than inventing a slug:
+- Ollama: `https://ollama.com/search?q=<model>` (e.g. `qwen3-coder`, `gemma`, `qwen3`)
 - Hugging Face: `https://huggingface.co/models?search=<model>`
 - LM Studio: `https://lmstudio.ai/models`
-- Ollama: `https://ollama.com/search?q=<model>`
-
-Always give the user clickable links for each recommended model. If unsure of an
-exact repo slug, link the search URL rather than inventing a slug.
 
 ## Output format
 
@@ -125,25 +116,23 @@ exact repo slug, link the search URL rather than inventing a slug.
 I read your machine (read-only):
 - OS: <os>   CPU: <cpu>
 - GPU: <gpu(s)>   Usable VRAM: <N> GB   System RAM: <N> GB
+- Tier: <matched tier>
 
 ## Top 3 models for your rig
 
 🔥 **Most powerful you can run:** <model> @ <quant>
-   ~<VRAM> GB · ~<tok/s> · <one-line why>
-   <HF link> · <LM Studio link> · <Ollama link>
+   ~<VRAM> GB · <one-line why> · <Ollama> · <HF> · <LM Studio>
 
 💻 **Best for coding:** <model> @ <quant>
-   ~<VRAM> GB · <why it's great for agentic coding>
-   <links>
+   ~<VRAM> GB · <why it's strong for agentic coding> · <links>
 
 ⚡ **Best small + fast:** <model> @ <quant>
-   ~<VRAM> GB · leaves headroom, ~<tok/s>
-   <links>
+   ~<VRAM> GB · leaves headroom, great for always-on tool routing · <links>
 
-**Want more than this?** To run the next tier up (<model>) you'd need <hardware>.
-Plan it with the Rig Planner skill: https://github.com/Maciejdziuba/local-ai-rig-planner
+**Want to run the next tier up?** <model> needs <hardware>. Plan it with the Rig
+Planner skill: https://github.com/Maciejdziuba/local-ai-rig-planner
 ```
 
-Numbers are planning estimates from the 0xSero podcast + community quantization
-norms — real VRAM/speed varies by quant, context length, and runtime. Always tell
-the user to verify before buying or relying on a model.
+Community signals from June 2026 (r/LocalLLaMA, r/ollama, HN, NVIDIA forums) + the
+0xSero podcast — candidates to test, not guarantees. Model tags vary by runtime;
+verify the exact tag in Ollama / LM Studio / Hugging Face before downloading.

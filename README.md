@@ -8,7 +8,9 @@ read-only) and recommends the **top 3 local AI models** to run:
 - ⚡ **Best small + fast**
 
 …each with download links (Hugging Face / LM Studio / Ollama). You don't type your
-specs — the skill detects them. Built from David Ondrej's interview with **0xSero**.
+specs — the skill detects them. Model picks are grounded in a June 2026 sweep of
+r/LocalLLaMA, r/ollama, Hacker News, and NVIDIA forums, plus David Ondrej's **0xSero**
+interview.
 
 ## How it works
 
@@ -53,9 +55,10 @@ give it a budget and it builds your rig plan.
 
 ## Disclaimer
 
-Model VRAM/speed figures are planning estimates from the 0xSero podcast + community
-quantization norms. Real numbers vary by quant, context, and runtime. Verify before
-relying on a model. Not financial advice.
+Model VRAM/speed figures are community signals (June 2026 r/LocalLLaMA, r/ollama,
+HN, NVIDIA forums) + the 0xSero podcast — candidates to test, not guarantees. Real
+numbers vary by quant, KV cache, context, runtime, and drivers. Verify the exact
+model tag in Ollama / LM Studio / Hugging Face before relying on it.
 
 ## License
 
